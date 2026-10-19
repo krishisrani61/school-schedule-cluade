@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Letter Day Schedule</title>
+<style>
+:root{--bg:#3b3b3b;--p:#303030;--p2:#484848;--t:#ececec;--m:#a9a9a9;--a:#e8c36a;--b:#5c5c5c;--r:#ff8a80;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--t);font:15px/1.4 "Segoe UI",system-ui,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--p);padding:.6rem 1rem;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;border-bottom:1px solid var(--b)}
+h1{font:600 1.05rem Georgia,serif;margin:0 .6rem 0 0}h3{margin:0 0 .6rem;font-size:1rem}
+main{max-width:1000px;margin:0 auto;padding:1rem}
+nav{display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:1rem}
+button,input,select{font:inherit;color:var(--t);background:var(--p2);border:1px solid var(--b);border-radius:6px;padding:.35rem .6rem}
+button{cursor:pointer}button:hover,input:focus,select:focus{border-color:var(--a);outline:none}
+button:focus-visible{outline:2px solid var(--a)}
+button.on,button.pri{background:var(--a);color:#222;border-color:var(--a);font-weight:600}
+button.del{color:var(--r)}
+.card{background:var(--p);border:1px solid var(--b);border-radius:8px;padding:1rem;margin-bottom:1rem}
+.row{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.7rem;align-items:flex-end}
+label{display:flex;flex-direction:column;gap:.2rem;font-size:.8rem;color:var(--m)}
+label.i{flex-direction:row;align-items:center;gap:.4rem;font-size:.9rem;color:var(--t)}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid var(--b);padding:.3rem;text-align:center;font-weight:400}
+th{color:var(--m);font-size:.8rem}th[data-r],th[data-c]{cursor:pointer}
+.slots{width:auto}.slots td.tk{background:#555}
+.grid td{padding:0}.grid td button{width:100%;min-height:3.2rem;font-size:.72rem;border:0;border-radius:0;background:transparent;line-height:1.2}
+.m{color:var(--m);font-size:.85rem}#st{color:var(--m);font-size:.85rem;margin-left:auto}
+.scr{max-height:60vh;overflow:auto}td.l{text-align:left}
+dialog{background:var(--p);color:var(--t);border:1px solid var(--a);border-radius:8px}
+::backdrop{background:#0008}
+</style></head><body>
+<header><h1>Letter Day Schedule</h1>
+<button data-a=open>Open</button><button data-a=save>Save</button><button data-a=saveas>Save as</button>
+<label class=i><input type=checkbox id=au data-a=auto>Autosave</label>
+<button id=rc data-a=reconnect hidden></button>
+<button class=pri data-a=ics>Export .ics</button><span id=st></span></header>
+<main><nav id=nav></nav><div id=v></div></main>
+<dialog id=dlg></dialog>
+<input type=file id=fi accept=".json" hidden><input type=file id=fs accept=".json" hidden>
+<script>
+const $=s=>document.querySelector(s),E=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const uid=()=>Math.random().toString(36).slice(2,9);
+const C=(name,teacher,room,s)=>({id:uid(),name,teacher,room,slots:s.split(' ')});
+const DEF=()=>({v:1,school:{name:'SHS 2026-27',tz:'America/New_York',prefix:'SHS RM ',letters:'A,B,C,D,E,F',
+periods:[['08:05','09:05'],['09:10','10:15'],['10:20','11:20'],['11:25','11:50'],['11:55','12:25'],['12:30','12:55'],['13:00','14:00'],['14:05','15:05']],
+offOn:false,offName:'No Class',offLoc:'Off'},days:[],classes:[
+C('Physical Sci: Chemistry','Nelson, Christine','144','A2 B2 C1 D2 E2'),
+C('Intro Engineering Sci Hnrs DE','Feldmann, Frederick','110','A5 A6 C3 D5 D6 F3'),
+C('English 11: Creative Writing','Pulice, Vittorio','B17','A7 B8 D7 E8'),
+C('U.S. History & Government','Howard, Erin','221','A8 C7 D8 F7'),
+C('Automotive Technology 2','Zizic, Erick','108','B1 C2 E1 F2'),
+C('Health 11','Renart, Larissa','010','B3 E3'),
+C('Algebra 2','Tagliavia, Julia','A8','B7 C8 E7 F8'),
+C('PE Outdoor Ed','Castaldo, Lisa','Gym 3','C5 C6 F5 F6')]});
+let S;try{S=JSON.parse(localStorage.lds)}catch{}if(!S||!S.school)S=DEF();
+let tab='classes',D={id:'',name:'',teacher:'',room:'',slots:[]},fh=null,auto=false,tm;
+const L=()=>S.school.letters.split(',').map(x=>x.trim()).filter(Boolean);
+const msg=(t,bad)=>{const e=$('#st');e.textContent=t;e.style.color=bad?'var(--r)':''};
+const er=e=>msg(e&&e.message||String(e),1);
+const owner=k=>S.classes.find(c=>c.slots.includes(k));
+const hue=c=>S.classes.indexOf(c)*47%360;
+function changed(){try{localStorage.lds=JSON.stringify(S)}catch{}
+ if(auto&&fh){clearTimeout(tm);tm=setTimeout(()=>wr().catch(er),500)}}
+/* ---------- views ---------- */
+function render(){
+ $('#nav').innerHTML=[['classes','Classes'],['grid','Weekly grid'],['school','School & periods'],['cal','Calendar']]
+  .map(([k,n])=>`<button data-a=tab data-k=${k} class="${tab===k?'on':''}">${n}</button>`).join('');
+ $('#v').innerHTML={classes:vClasses,grid:vGrid,school:vSchool,cal:vCal}[tab]();
+}
+function vClasses(){const ls=L(),P=S.school.periods,T=[...new Set(S.classes.map(c=>c.teacher).filter(Boolean))];
+ return `<div class=card><h3>${D.id?'Edit class':'Add a class'}</h3>
+ <div class=row><label>Class name<input id=dn value="${E(D.name)}"></label>
+ <label>Teacher<input id=dt list=tl value="${E(D.teacher)}"></label><label>Room<input id=dr size=8 value="${E(D.room)}"></label></div>
+ <datalist id=tl>${T.map(t=>`<option value="${E(t)}">`).join('')}</datalist>
+ <p class=m>Tick every Day × Period this class meets. Click a letter or period label to tick its whole column or row.</p>
+ <table class=slots><tr><th></th>${ls.map(l=>`<th data-c=${l}>${l}</th>`).join('')}</tr>
+ ${P.map((p,i)=>`<tr><th data-r=${i+1}>P${i+1}</th>${ls.map(l=>{const k=l+(i+1),o=owner(k),x=o&&o.id!==D.id;
+ return `<td class="${x?'tk':''}" title="${x?E(o.name):''}"><input type=checkbox data-s=${k} ${D.slots.includes(k)?'checked':''}></td>`}).join('')}</tr>`).join('')}</table>
+ <p class=m>Shaded boxes belong to another class; ticking one moves it here.</p>
+ <button class=pri data-a=saveClass>${D.id?'Update class':'Add class'}</button> <button data-a=clearDraft>Clear form</button></div>
+ <div class=card><h3>Classes (${S.classes.length})</h3>${S.classes.length?`<table>${S.classes.map(c=>`<tr><td class=l><b>${E(c.name)}</b><br><span class=m>${E(c.teacher)} · ${E(c.room)}</span></td>
+ <td class=l>${E([...c.slots].sort().join(' '))}</td><td><button data-a=edit data-id=${c.id}>Edit</button> <button class=del data-a=del data-id=${c.id}>Delete</button></td></tr>`).join('')}</table>`:'<p class=m>No classes yet. Fill in the form above.</p>'}</div>`}
+function vGrid(){const ls=L(),P=S.school.periods;
+ return `<div class=card><p class=m>Click a cell to assign a class or create a new one for that slot.</p><table class=grid><tr><th></th>${ls.map(l=>`<th>${l}</th>`).join('')}</tr>
+ ${P.map((p,i)=>`<tr><th>P${i+1}<br>${E(p[0])}–${E(p[1])}</th>${ls.map(l=>{const k=l+(i+1),c=owner(k);
+ return `<td ${c?`style="background:hsl(${hue(c)} 30% 26%)"`:''}><button data-a=cell data-k=${k}>${c?E(c.name)+'<br><span class=m>'+E(c.room)+'</span>':'<span class=m>free</span>'}</button></td>`}).join('')}</tr>`).join('')}</table></div>`}
+function vSchool(){const s=S.school,f=(k,n,x='')=>`<label>${n}<input data-f=${k} value="${E(s[k])}" ${x}></label>`;
+ return `<div class=card><h3>School</h3><div class=row>${f('name','School / calendar name')}${f('tz','Time zone (IANA)')}${f('prefix','Room prefix for locations')}${f('letters','Day letters, comma separated')}</div>
+ <div class=row><label class=i><input type=checkbox data-f=offOn ${s.offOn?'checked':''}>Include free periods in .ics</label>${f('offName','Free period title')}${f('offLoc','Free period location')}</div></div>
+ <div class=card><h3>Bell schedule</h3><table class=slots><tr><th>Period</th><th>Start</th><th>End</th></tr>
+ ${s.periods.map((p,i)=>`<tr><th>${i+1}</th><td><input type=time data-p=${i}:0 value="${p[0]}"></td><td><input type=time data-p=${i}:1 value="${p[1]}"></td></tr>`).join('')}</table>
+ <p><button data-a=addP>Add period</button> <button data-a=delP ${s.periods.length<2?'disabled':''}>Remove last</button></p></div>
+ <div class=card><h3>Copy school data from another file</h3><p class=m>Takes the school settings, bell schedule and calendar from another JSON file. Your classes stay as they are.</p><button data-a=school>Choose file…</button></div>`}
+const WD=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function vCal(){const ls=L();
+ return `<div class=card><h3>Add school days</h3><div class=row><label>First day<input type=date id=cs></label><label>Last day<input type=date id=ce></label>
+ <button data-a=gen>Add weekdays</button></div>
+ <div class=row><label>First letter<select id=sl>${ls.map(l=>`<option>${l}</option>`).join('')}</select></label><button data-a=fill>Assign letters to all days</button><button class=del data-a=clrDays>Clear days</button></div>
+ <div class=row><label>Off from<input type=date id=of></label><label>Off to<input type=date id=ot></label><label>Reason<input id=on placeholder="Winter recess"></label><button data-a=off>Mark days off</button></div>
+ <p class=m>Letters run in order and skip days off. On a row, “→” renumbers every later day from that row's letter (for snow days).</p></div>
+ <div class="card scr">${S.days.length?`<table><tr><th>Date</th><th></th><th>Day</th><th>Note</th><th></th></tr>${S.days.map((x,i)=>`<tr><td>${x.d}</td><td>${WD[new Date(x.d).getUTCDay()]}</td>
+ <td><select data-d=${i}><option value=OFF ${x.off?'selected':''}>Off</option>${ls.map(l=>`<option ${!x.off&&x.l===l?'selected':''}>${l}</option>`).join('')}</select></td>
+ <td><input data-n=${i} value="${E(x.note||'')}"></td><td><button data-a=cont data-i=${i} title="Renumber later days from here">→</button></td></tr>`).join('')}</table>`:'<p class=m>No days yet. Add a date range above.</p>'}</div>`}
+/* ---------- actions ---------- */
+function sync(){if(!$('#dn'))return;D.name=$('#dn').value;D.teacher=$('#dt').value;D.room=$('#dr').value}
+function cell(k){const cur=owner(k);dlg.innerHTML=`<form method=dialog><h3>${k}</h3><select id=ds><option value="">Free period</option>
+ ${S.classes.map(c=>`<option value=${c.id} ${cur&&cur.id===c.id?'selected':''}>${E(c.name)} (${E(c.teacher)})</option>`).join('')}<option value="+">+ New class…</option></select>
+ <p><button value=ok class=pri>OK</button> <button value=x>Cancel</button></p></form>`;
+ dlg.onclose=()=>{if(dlg.returnValue!=='ok')return;const v=$('#ds').value;
+  if(v==='+'){D={id:'',name:'',teacher:'',room:'',slots:[k]};tab='classes';return render()}
+  S.classes.forEach(c=>c.slots=c.slots.filter(x=>x!==k));const c=S.classes.find(c=>c.id===v);if(c)c.slots.push(k);changed();render()};
+ dlg.returnValue='';dlg.showModal()}
+function fill(from,start){const ls=L();let k=Math.max(0,ls.indexOf(start));
+ for(let i=from;i<S.days.length;i++){const x=S.days[i];if(x.off){x.l='';continue}x.l=ls[k++%ls.length]}}
+const A={
+ tab:b=>{sync();tab=b.dataset.k;render()},
+ saveClass(){sync();if(!D.name.trim())return msg('Enter a class name',1);
+  S.classes.forEach(c=>{if(c.id!==D.id)c.slots=c.slots.filter(k=>!D.slots.includes(k))});
+  const o={id:D.id||uid(),name:D.name.trim(),teacher:D.teacher.trim(),room:D.room.trim(),slots:[...D.slots]},i=S.classes.findIndex(c=>c.id===D.id);
+  i<0?S.classes.push(o):S.classes[i]=o;D={id:'',name:'',teacher:'',room:'',slots:[]};changed();render();msg('Class saved')},
+ clearDraft(){D={id:'',name:'',teacher:'',room:'',slots:[]};render()},
+ edit:b=>{const c=S.classes.find(c=>c.id===b.dataset.id);D={...c,slots:[...c.slots]};render();scrollTo(0,0)},
+ del:b=>{const c=S.classes.find(c=>c.id===b.dataset.id);if(confirm('Delete '+c.name+'?')){S.classes=S.classes.filter(x=>x!==c);changed();render()}},
+ cell:b=>cell(b.dataset.k),
+ addP(){const p=S.school.periods,l=p[p.length-1];p.push([l[1],l[1]]);changed();render()},
+ delP(){S.school.periods.pop();S.classes.forEach(c=>c.slots=c.slots.filter(k=>+k.slice(1)<=S.school.periods.length));changed();render()},
+ gen(){const a=$('#cs').value,b=$('#ce').value;if(!a||!b||b<a)return msg('Pick a first and last day',1);
+  const have=new Set(S.days.map(x=>x.d));for(let t=Date.parse(a);t<=Date.parse(b);t+=864e5){const s=new Date(t).toISOString().slice(0,10),w=new Date(t).getUTCDay();
+   if(w&&w<6&&!have.has(s))S.days.push({d:s,l:'',off:false,note:''})}
+  S.days.sort((x,y)=>x.d<y.d?-1:1);changed();render()},
+ fill(){fill(0,$('#sl').value);changed();render()},
+ cont:b=>{const i=+b.dataset.i,ls=L();fill(i+1,ls[(ls.indexOf(S.days[i].l)+1)%ls.length]);changed();render()},
+ clrDays(){if(confirm('Remove all school days?')){S.days=[];changed();render()}},
+ off(){const a=$('#of').value,b=$('#ot').value||a;if(!a)return msg('Pick a date',1);
+  S.days.forEach(x=>{if(x.d>=a&&x.d<=b){x.off=true;x.l='';x.note=$('#on').value}});changed();render()},
+ school:()=>$('#fs').click(),
+ open:async()=>{if(!window.showOpenFilePicker)return $('#fi').click();
+  try{const[h]=await showOpenFilePicker({types:[{description:'Schedule',accept:{'application/json':['.json']}}]});fh=h;idb('put',h).catch(()=>{});load(await(await h.getFile()).text())}catch(e){if(e.name!=='AbortError')er(e)}},
+ save:async()=>{try{fh?await wr():await saveAs()}catch(e){er(e)}},
+ saveas:async()=>{try{await saveAs()}catch(e){er(e)}},
+ auto:async b=>{if(!b.checked){auto=false;return msg('Autosave off')}
+  if(!window.showSaveFilePicker){b.checked=false;return msg('Autosave needs Chrome or Edge',1)}
+  try{if(!fh)await saveAs();else if(await fh.requestPermission({mode:'readwrite'})!=='granted')throw Error('Permission denied');
+   if(!fh)throw Error('No file chosen');auto=true;await wr()}catch(e){auto=false;b.checked=false;er(e)}},
+ reconnect:async()=>{try{const h=await idb('get');if(await h.requestPermission({mode:'readwrite'})!=='granted')throw Error('Permission denied');
+  fh=h;load(await(await h.getFile()).text());$('#rc').hidden=true}catch(e){er(e)}},
+ ics
+};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');
+ if(b&&b.type!=='checkbox'){A[b.dataset.a](b);return}
+ const h=e.target.closest('th[data-r],th[data-c]');if(h&&$('#dn')){sync();const ls=L(),n=S.school.periods.length;
+  const ks=h.dataset.r?ls.map(l=>l+h.dataset.r):Array.from({length:n},(_,i)=>h.dataset.c+(i+1));
+  const all=ks.every(k=>D.slots.includes(k));D.slots=all?D.slots.filter(k=>!ks.includes(k)):[...new Set([...D.slots,...ks])];render()}});
+document.addEventListener('change',e=>{const t=e.target;
+ if(t.dataset.a==='auto')return A.auto(t);
+ if(t.dataset.s){const k=t.dataset.s;D.slots=t.checked?[...D.slots,k]:D.slots.filter(x=>x!==k)}
+ else if(t.dataset.f){const v=t.type==='checkbox'?t.checked:t.value;S.school[t.dataset.f]=v;changed();if(t.dataset.f==='letters')render();else changed()}
+ else if(t.dataset.p){const[i,j]=t.dataset.p.split(':');S.school.periods[i][j]=t.value;changed()}
+ else if(t.dataset.d!==undefined){const x=S.days[t.dataset.d];x.off=t.value==='OFF';x.l=x.off?'':t.value;changed()}
+ else if(t.dataset.n!==undefined){S.days[t.dataset.n].note=t.value;changed()}});
+/* ---------- files ---------- */
+const idb=(m,v)=>new Promise((res,rej)=>{const r=indexedDB.open('lds',1);r.onupgradeneeded=()=>r.result.createObjectStore('k');
+ r.onsuccess=()=>{const s=r.result.transaction('k',m==='get'?'readwrite':'readwrite').objectStore('k'),q=m==='get'?s.get('fh'):s.put(v,'fh');q.onsuccess=()=>res(q.result);q.onerror=rej};r.onerror=rej});
+const J={types:[{description:'Schedule',accept:{'application/json':['.json']}}],suggestedName:'schedule.json'};
+function dl(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1e3)}
+async function wr(){const w=await fh.createWritable();await w.write(JSON.stringify(S,null,2));await w.close();msg('Saved '+fh.name+' at '+new Date().toLocaleTimeString())}
+async function saveAs(){if(!window.showSaveFilePicker){dl('schedule.json',JSON.stringify(S,null,2),'application/json');return msg('Downloaded schedule.json')}
+ try{fh=await showSaveFilePicker(J);idb('put',fh).catch(()=>{});await wr()}catch(e){if(e.name!=='AbortError')throw e}}
+function norm(j){if(!j||!j.school||!Array.isArray(j.classes))throw Error('Not a schedule file');
+ const d=DEF();return{v:1,school:{...d.school,...j.school},days:j.days||[],classes:j.classes}}
+function load(t){try{S=norm(JSON.parse(t));D={id:'',name:'',teacher:'',room:'',slots:[]};changed();render();msg('File loaded')}catch(e){er(e)}}
+$('#fi').onchange=async e=>{if(e.target.files[0])load(await e.target.files[0].text());e.target.value=''};
+$('#fs').onchange=async e=>{try{const j=norm(JSON.parse(await e.target.files[0].text()));S.school=j.school;S.days=j.days;
+ S.classes.forEach(c=>c.slots=c.slots.filter(k=>+k.slice(1)<=S.school.periods.length));changed();render();msg('School data copied')}catch(x){er(x)}e.target.value=''};
+/* ---------- ics ---------- */
+function ics(){const s=S.school,ie=t=>String(t).replace(/[\\;,]/g,'\\$&').replace(/\n/g,'\\n'),fold=l=>l.length<=73?l:l.match(/.{1,73}/g).join('\r\n '),
+ dt=(d,t)=>d.replace(/-/g,'')+'T'+t.replace(':','')+'00',stamp=new Date().toISOString().replace(/[-:]|\.\d+/g,'');
+ const o=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//LetterDaySchedule//EN','CALSCALE:GREGORIAN','X-WR-CALNAME:'+ie(s.name),'X-WR-TIMEZONE:'+s.tz];let n=0;
+ S.days.filter(x=>x.l&&!x.off).forEach(x=>s.periods.forEach((p,i)=>{if(!p[0]||!p[1])return;const k=x.l+(i+1),c=owner(k);if(!c&&!s.offOn)return;
+  o.push('BEGIN:VEVENT',`UID:${x.d}-${k}@letterday`,'DTSTAMP:'+stamp,`DTSTART;TZID=${s.tz}:${dt(x.d,p[0])}`,`DTEND;TZID=${s.tz}:${dt(x.d,p[1])}`,
+   'SUMMARY:'+ie(c?`(${k}) ${c.name}`:s.offName),'LOCATION:'+ie(s.prefix+(c?c.room:s.offLoc)));
+  if(c&&c.teacher)o.push('DESCRIPTION:'+ie(c.teacher));o.push('END:VEVENT');n++}));
+ if(!n)return msg('Nothing to export: add school days with letters and classes first',1);
+ o.push('END:VCALENDAR');dl('schedule.ics',o.map(fold).join('\r\n')+'\r\n','text/calendar');msg('Exported '+n+' events')}
+idb('get').then(h=>{if(h&&window.showOpenFilePicker){$('#rc').textContent='Reconnect '+h.name;$('#rc').hidden=false}}).catch(()=>{});
+render();
+</script></body></html>
